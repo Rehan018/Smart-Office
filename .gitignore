@@ -1,0 +1,24 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+venv/
+
+# Node
+node_modules/
+dist/
+
+# Vite / React
+*.log
+
+# Local data / runtime
+*.db
+smart-office-poc/backend/data/
+
+# Test artifacts
+.pytest_cache/
+
+# OS
+.DS_Store
