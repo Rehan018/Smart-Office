@@ -1,98 +1,83 @@
-# Backend POC Plan (Python)
+# Backend POC Game Plan (Python)
 
-## Goal
+## The Goal
 
-Build a minimal, offline-first backend that can store, retrieve, update, and template documents over a LAN without any external services.
+We need to whip up a solid, offline-first backend. Ideally, it should handle storing, retrieving, and updating documents over the local network (LAN) without needing to phone home to the cloud. Think of it as a "local cloud" for the office.
 
-## Scope (POC)
+## What's in the Box (POC Scope)
 
-- REST API for documents and templates
-- Local persistence (SQLite + filesystem for assets)
-- Version-based conflict detection
-- LAN-only deployment
+For this Proof of Concept, we're keeping it lean but functional:
 
-## Tech Stack
+* **REST API**: Standard endpoints to manage docs and templates.
+* **Local Storage**: We'll stick to SQLite for data and the local filesystem for any images/assets. Simple and reliable.
+* **Conflict Handling**: We'll use version numbers to detect if two people try to save at the same time.
+* **LAN Only**: The server just binds to the local network IP. No internet required.
 
-- Python 3.11+
-- FastAPI + Uvicorn
-- SQLite (local file)
-- Pydantic for schemas
-- Pytest for basic API tests
+## The Tech Stack
 
-## API Contract (POC)
+We're going with a robust Python setup:
 
-- `GET /api/documents` -> list documents (id, title, last_modified, is_template); supports `?q=search&limit=20`
-- `GET /api/documents/:id` -> fetch document (id, title, content, version)
-- `POST /api/documents` -> create document (title, content)
-- `PUT /api/documents/:id` -> update (content, base_version) -> returns new version or 409
-- `DELETE /api/documents/:id` -> delete
-- `POST /api/documents/:id/lock` -> acquire lock (returns lock holder + expiry)
-- `POST /api/documents/:id/unlock` -> release lock
+* **Python 3.11+**: Modern and fast.
+* **FastAPI + Uvicorn**: Great for building APIs quickly with auto-generated docs (Swagger UI).
+* **SQLite**: It's built right into Python, so no external database server to manage.
+* **Pydantic**: Keeps our data validation strict and sanity-checked.
+* **Pytest**: For making sure our endpoints actually work before we ship.
 
-Templates:
+## API Cheat Sheet
 
-- `GET /api/templates` -> list templates
-- `POST /api/templates` -> create template
-- `POST /api/documents/from-template/:templateId` -> instantiate doc from template; accepts `{user_variables: { ... } }`
+Here are the main endpoints we're building:
 
-Real-time:
+### Documents
 
-- `WS /ws/documents/:id` -> presence + lock events (`user_joined`, `user_left`, `lock_acquired`, `lock_released`)
+* `GET /api/documents` - Grabs a list of all docs. Supports basic search (`?q=...`) if you need it.
+* `GET /api/documents/:id` - Gets the full document content.
+* `POST /api/documents` - Creates a fresh new document.
+* `PUT /api/documents/:id` - Updates a doc. **Heads up:** This checks the `base_version` to prevent overwriting someone else's work. Returns `409 Conflict` if you're out of date.
+* `DELETE /api/documents/:id` - Zaps a document.
+* `POST /api/documents/:id/lock` & `unlock` - Manually locks a file so others know you're editing it.
 
-Assets (optional):
+### Templates
 
-- `POST /api/documents/:id/assets` -> store images/files on disk and return local URL
+* `GET /api/templates` - Lists available templates.
+* `POST /api/templates` - Creates a new template.
+* `POST /api/documents/from-template/:templateId` - The magic endpoint. You send it variables (like `{ "name": "Rehan" }`), and it spits out a new document with those values filled in.
 
-## Data Model (SQLite)
+### Real-time Stuff
 
-- `documents` table:
-  - `id` (text, primary key)
-  - `title` (text)
-  - `content_json` (text or blob; Quill Delta or AST)
-  - `version` (integer)
-  - `is_template` (boolean)
-  - `last_modified_at` (datetime)
-  - `locked_by` (text, nullable)
+* `WS /ws/documents/:id` - The WebSocket channel. This is where the live action happens—knowing who else is in the document and seeing lock updates instantly.
 
-## Implementation Steps
+## The Data Model (SQLite)
 
-1. Initialize FastAPI app structure and settings
-2. Define Pydantic schemas for requests/responses
-3. Add SQLite connection and repository layer
-4. Implement CRUD routes for documents
-5. Implement template creation + instantiation
-6. Add optimistic concurrency checks (409 on conflict)
-7. Add basic asset upload storage (filesystem)
-8. Write minimal pytest coverage for create/get/update/conflict
-9. Document run steps and LAN usage
+We're keeping the database schema dead simple:
 
-## Offline + LAN Guarantees
+* `id`: Unique string (UUID).
+* `title`: The name of the doc.
+* `content_json`: The actual text (Quill Delta format), stored as a JSON string.
+* `version`: An integer that bumps up (`1`, `2`, `3`...) on every save.
+* `locked_by`: Who currently "owns" the edit rights.
 
-- No external calls or telemetry
-- Bind server to `0.0.0.0`
-- Keep all data on local disk
+## How We'll Build It
 
-## Real-Time Capabilities (Presence + Locking)
+1. **Setup**: Get the FastAPI skeleton running.
+2. **Database**: Wire up SQLite and defines the models.
+3. **CRUD**: Build the basic create/read/update endpoints.
+4. **Templates**: Add the logic to swap `{{variables}}` for real text.
+5. **Safety**: Implement that version check (Optimistic Locking) so users don't overwrite each other.
+6. **Assets**: Allow uploading images to a local folder.
+7. **Tests**: Write a few sanity checks with Pytest.
 
-- WebSocket channel broadcasts who is viewing/editing a document.
-- Locking can be acquired/released via REST endpoints or automatically via WebSocket connect/disconnect.
-- The API should return the current lock holder on `GET /api/documents/:id` so the UI can display “Locked by Jane”.
+## A Note on "Offline" & LAN
 
-## Suggestions For Improvement
+Since this runs on a local machine (likely a designated "server" PC):
 
-- CORS configuration: add explicit CORS middleware to allow the LAN UI origin (or `*` during POC) when the frontend runs on a different port.
-- Asset serving: mount a static files route in FastAPI (e.g., `/static`) so stored images can be retrieved by the frontend.
-- Discovery: consider mDNS advertising of the HTTP service (e.g., via `zeroconf`) to avoid typing IP addresses.
+* We bind to `0.0.0.0` so anyone on the WiFi can hit the API.
+* We strictly avoid any external API calls. Everything stays in the building.
 
-## Optional AI Frameworks (Future Only)
+## Future Ideas (Not for POC)
 
-These are NOT required for the POC. Use only if/when you add AI later.
+If we want to get fancy later:
 
-- **LangGraph**: Best for stateful, multi-step workflows and human-in-the-loop approvals.
-- **LangChain**: Broad integration ecosystem; useful if you need many connectors.
-- **LlamaIndex**: Strong for RAG over stored documents.
-- **Haystack**: Solid for retrieval pipelines and agent-style flows.
+* **mDNS/Zeroconf**: So users can go to `http://smartoffice.local` instead of typing IP addresses.
+* **AI Integration**: If we add AI later, we'd probably look at **LangGraph** for workflows or **LlamaIndex** for searching through docs, but let's keep it 100% deterministic for now.
 
-## Recommendation
-
-For this POC, skip AI frameworks to keep the system deterministic and offline. If you add AI later, prefer **LangGraph** for workflow control or **LlamaIndex** for document-centric RAG.
+That's the plan! Let's get coding. 🚀
